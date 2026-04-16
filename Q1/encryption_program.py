@@ -45,14 +45,16 @@ def decrypt_char(ch, shift1, shift2):
         return ch
 
 # Function to encrypt entire file
+
 def encrypt_file(shift1, shift2):
     try:
+        
         # Open raw text file for reading
         with open("raw_text.txt", "r") as file:
             content = file.read()
 
         encrypted_text = ""
-
+        
         # Loop through each character and encrypt
         for ch in content:
             encrypted_text += encrypt_char(ch, shift1, shift2)
@@ -60,7 +62,7 @@ def encrypt_file(shift1, shift2):
         # Write encrypted text to new file
         with open("encrypted_text.txt", "w") as file:
             file.write(encrypted_text)
-
+            
         print("Encryption completed successfully!")
 
     except FileNotFoundError:
@@ -68,8 +70,10 @@ def encrypt_file(shift1, shift2):
 
 
 # Function to decrypt entire file
+
 def decrypt_file(shift1, shift2):
     try:
+         
         # Open encrypted file
         with open("encrypted_text.txt", "r") as file:
             content = file.read()
@@ -88,6 +92,7 @@ def decrypt_file(shift1, shift2):
 
     except FileNotFoundError:
         print("Error: encrypted_text.txt file not found!")
+
 
 # Function to verify if original and decrypted files match
 def verify_files():
