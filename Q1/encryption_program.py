@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------
 # HIT137 Assignment 2 - Question 1
-# Author: (Your Name)
+# Author:
 # Description:
 # This program reads a text file, encrypts its content based on
 # custom shifting rules, decrypts it back, and verifies correctness.
@@ -89,7 +89,6 @@ def decrypt_file(shift1, shift2):
     except FileNotFoundError:
         print("Error: encrypted_text.txt file not found!")
 
-
 # Function to verify if original and decrypted files match
 def verify_files():
     try:
@@ -113,7 +112,6 @@ def verify_files():
     except FileNotFoundError:
         print("Error: One or more files missing for verification!")
     
-
 
 # ---------------- MAIN PROGRAM ----------------
 
