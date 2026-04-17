@@ -1,316 +1,255 @@
+
+
 import os
-import math
 
-# -----------------------------
-# Token representation
-# -----------------------------
-class Token:
-    def __init__(self, ttype, value):
-        self.type = ttype  # 'NUM', 'OP', 'LPAREN', 'RPAREN', 'END'
-        self.value = value
+def evaluate_file(input_path: str) -> list[dict]:
+    results = []
+    with open(input_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
 
-    def __repr__(self):
-        return f"[{self.type}:{self.value}]"
+    output_path = os.path.join(os.path.dirname(input_path), "output.txt")
 
+    with open(output_path, "w", encoding="utf-8") as out:
+        for line in lines:
+            original = line.rstrip("\n")
+            try:
+                tokens = tokenize(original)
+                state = {"tokens": tokens, "pos": 0}
+                tree = parse_expression(state)
 
-# -----------------------------
-# Lexer / Tokenizer
-# -----------------------------
-def tokenize(expr):
+                if current_token(state)["type"] != "END":
+                    raise ValueError("Extra tokens after valid expression")
+
+                tree_string = tree_to_string(tree)
+                token_string = format_tokens(tokens)
+
+                value = evaluate_tree(tree)
+
+                if value == "ERROR":
+                    result_value = "ERROR"
+                else:
+                    result_value = float(value)
+
+                result_dict = {
+                    "input": original,
+                    "tree": tree_string,
+                    "tokens": token_string,
+                    "result": result_value
+                }
+
+            except Exception:
+                result_dict = {
+                    "input": original,
+                    "tree": "ERROR",
+                    "tokens": "ERROR",
+                    "result": "ERROR"
+                }
+
+            results.append(result_dict)
+            out.write(f"Input: {result_dict['input']}\n")
+            out.write(f"Tree: {result_dict['tree']}\n")
+            out.write(f"Tokens: {result_dict['tokens']}\n")
+
+            if result_dict["result"] == "ERROR":
+                out.write("Result: ERROR\n")
+            else:
+                out.write(f"Result: {format_result(result_dict['result'])}\n")
+
+            out.write("\n")
+
+    return results
+
+def tokenize(text: str) -> list[dict]:
     tokens = []
     i = 0
-    n = len(expr)
+    prev_type = None
 
-    def is_digit(ch):
-        return ch.isdigit() or ch == "."
-
-    while i < n:
-        ch = expr[i]
+    while i < len(text):
+        ch = text[i]
 
         if ch.isspace():
             i += 1
             continue
-
-        if is_digit(ch):
+        if ch.isdigit() or ch == ".":
             start = i
             dot_count = 0
-            while i < n and is_digit(expr[i]):
-                if expr[i] == ".":
+
+            while i < len(text) and (text[i].isdigit() or text[i] == "."):
+                if text[i] == ".":
                     dot_count += 1
                 i += 1
-            if dot_count > 1:
+            number_text = text[start:i]
+            if dot_count > 1 or number_text == ".":
                 raise ValueError("Invalid number")
-            num_str = expr[start:i]
-            tokens.append(Token("NUM", num_str))
-            continue
+            if prev_type in ["NUM", "RPAREN"]:
+                tokens.append({"type": "OP", "value": "*"})
 
-        if ch in "+-*/":
-            tokens.append(Token("OP", ch))
-            i += 1
+            tokens.append({"type": "NUM", "value": number_text})
+            prev_type = "NUM"
             continue
 
         if ch == "(":
-            tokens.append(Token("LPAREN", ch))
+            if prev_type in ["NUM", "RPAREN"]:
+                tokens.append({"type": "OP", "value": "*"})
+
+            tokens.append({"type": "LPAREN", "value": "("})
+            prev_type = "LPAREN"
             i += 1
             continue
 
         if ch == ")":
-            tokens.append(Token("RPAREN", ch))
+            tokens.append({"type": "RPAREN", "value": ")"})
+            prev_type = "RPAREN"
             i += 1
             continue
 
-        # Unknown character
+        if ch in "+-*/":
+            tokens.append({"type": "OP", "value": ch})
+            prev_type = "OP"
+            i += 1
+            continue
+
         raise ValueError("Invalid character")
 
-    # Insert implicit multiplication: NUM or RPAREN followed by NUM or LPAREN
-    implicit = []
-    for idx, tok in enumerate(tokens):
-        implicit.append(tok)
-        if tok.type in ("NUM", "RPAREN"):
-            if idx + 1 < len(tokens):
-                nxt = tokens[idx + 1]
-                if nxt.type in ("NUM", "LPAREN"):
-                    implicit.append(Token("OP", "*"))
+    tokens.append({"type": "END", "value": ""})
+    return tokens
 
-    implicit.append(Token("END", ""))
-
-    # Check unary + (not allowed)
-    # Unary position: at start, after LPAREN, after OP
-    prev_type = "START"
-    for t in implicit:
-        if t.type == "OP" and t.value == "+":
-            if prev_type in ("START", "LPAREN", "OP"):
-                raise ValueError("Unary + not allowed")
-        if t.type not in ("END",):
-            prev_type = t.type
-
-    return implicit
-
-
-# -----------------------------
-# Parser / AST nodes
-# -----------------------------
-class NumNode:
-    def __init__(self, value):
-        self.value = value  # float
-
-class BinOpNode:
-    def __init__(self, op, left, right):
-        self.op = op  # '+', '-', '*', '/'
-        self.left = left
-        self.right = right
-
-class NegNode:
-    def __init__(self, expr):
-        self.expr = expr
-
-
-class Parser:
-    def __init__(self, tokens):
-        self.tokens = tokens
-        self.pos = 0
-        self.current = self.tokens[self.pos]
-
-    def advance(self):
-        self.pos += 1
-        if self.pos < len(self.tokens):
-            self.current = self.tokens[self.pos]
-
-    def expect(self, ttype):
-        if self.current.type == ttype:
-            self.advance()
-        else:
-            raise ValueError("Unexpected token")
-
-    def parse(self):
-        node = self.parse_expression()
-        if self.current.type != "END":
-            raise ValueError("Extra input")
-        return node
-
-    # expression -> term (('+' | '-') term)*
-    def parse_expression(self):
-        node = self.parse_term()
-        while self.current.type == "OP" and self.current.value in ("+", "-"):
-            op = self.current.value
-            self.advance()
-            right = self.parse_term()
-            node = BinOpNode(op, node, right)
-        return node
-
-    # term -> factor (('*' | '/') factor)*
-    def parse_term(self):
-        node = self.parse_factor()
-        while self.current.type == "OP" and self.current.value in ("*", "/"):
-            op = self.current.value
-            self.advance()
-            right = self.parse_factor()
-            node = BinOpNode(op, node, right)
-        return node
-
-    # factor -> '-' factor | primary
-    def parse_factor(self):
-        if self.current.type == "OP" and self.current.value == "-":
-            self.advance()
-            expr = self.parse_factor()
-            return NegNode(expr)
-        return self.parse_primary()
-
-    # primary -> NUM | '(' expression ')'
-    def parse_primary(self):
-        if self.current.type == "NUM":
-            val = float(self.current.value)
-            self.advance()
-            return NumNode(val)
-
-        if self.current.type == "LPAREN":
-            self.advance()
-            node = self.parse_expression()
-            if self.current.type != "RPAREN":
-                raise ValueError("Missing closing parenthesis")
-            self.advance()
-            return node
-
-        raise ValueError("Unexpected token in primary")
-
-
-# -----------------------------
-# Tree formatting
-# -----------------------------
-def format_tree(node):
-    if isinstance(node, NumNode):
-        # Display number literal as formatted value
-        if node.value.is_integer():
-            return str(int(node.value))
-        else:
-            return str(node.value)
-
-    if isinstance(node, NegNode):
-        return f"(neg {format_tree(node.expr)})"
-
-    if isinstance(node, BinOpNode):
-        return f"({node.op} {format_tree(node.left)} {format_tree(node.right)})"
-
-    return "ERROR"
-
-
-# -----------------------------
-# Evaluation
-# -----------------------------
-def eval_node(node):
-    if isinstance(node, NumNode):
-        return node.value
-
-    if isinstance(node, NegNode):
-        return -eval_node(node.expr)
-
-    if isinstance(node, BinOpNode):
-        left = eval_node(node.left)
-        right = eval_node(node.right)
-
-        if node.op == "+":
-            return left + right
-        if node.op == "-":
-            return left - right
-        if node.op == "*":
-            return left * right
-        if node.op == "/":
-            if right == 0:
-                raise ZeroDivisionError("Division by zero")
-            return left / right
-
-    raise ValueError("Invalid node")
-
-
-# -----------------------------
-# Token string formatting
-# -----------------------------
-def format_tokens(tokens):
+def format_tokens(tokens: list[dict]) -> str:
     parts = []
-    for t in tokens:
-        if t.type == "END":
+
+    for token in tokens:
+        if token["type"] == "END":
             parts.append("[END]")
         else:
-            parts.append(f"[{t.type}:{t.value}]")
+            parts.append(f"[{token['type']}:{token['value']}]")
+
     return " ".join(parts)
 
+def current_token(state: dict) -> dict:
+    return state["tokens"][state["pos"]]
 
-# -----------------------------
-# Main interface
-# -----------------------------
-def evaluate_expression(expr):
-    expr_stripped = expr.strip()
-    if expr_stripped == "":
-        raise ValueError("Empty expression")
+def consume_token(state: dict, expected_type=None, expected_value=None) -> dict:
+    token = current_token(state)
 
-    tokens = tokenize(expr_stripped)
-    parser = Parser(tokens)
-    tree = parser.parse()
-    value = eval_node(tree)
-    return tree, tokens, value
+    if expected_type is not None and token["type"] != expected_type:
+        raise ValueError("Unexpected token type")
+
+    if expected_value is not None and token["value"] != expected_value:
+        raise ValueError("Unexpected token value")
+
+    state["pos"] += 1
+    return token
+
+def parse_expression(state: dict):
+    left = parse_term(state)
+
+    while current_token(state)["type"] == "OP" and current_token(state)["value"] in ["+", "-"]:
+        op = consume_token(state, "OP")["value"]
+        right = parse_term(state)
+        left = ("bin", op, left, right)
+    return left
+
+def parse_term(state: dict):
+    left = parse_factor(state)
+
+    while current_token(state)["type"] == "OP" and current_token(state)["value"] in ["*", "/"]:
+        op = consume_token(state, "OP")["value"]
+        right = parse_factor(state)
+        left = ("bin", op, left, right)
+    return left
+
+def parse_factor(state: dict):
+    token = current_token(state)
+
+    if token["type"] == "OP" and token["value"] == "+":
+        raise ValueError("Unary plus not supported")
+
+    if token["type"] == "OP" and token["value"] == "-":
+        consume_token(state, "OP", "-")
+        operand = parse_factor(state)
+        return ("neg", operand)
+
+    return parse_primary(state)
+
+def parse_primary(state: dict):
+    token = current_token(state)
+
+    if token["type"] == "NUM":
+        consume_token(state, "NUM")
+        return ("num", float(token["value"]))
+    if token["type"] == "LPAREN":
+        consume_token(state, "LPAREN")
+        expr = parse_expression(state)
+        consume_token(state, "RPAREN")
+        return expr
+    raise ValueError("Expected number or (")
+
+def evaluate_tree(tree):
+    kind = tree[0]
+
+    if kind == "num":
+        return tree[1]
+
+    if kind == "neg":
+        val = evaluate_tree(tree[1])
+        if val == "ERROR":
+            return "ERROR"
+        return -val
+
+    if kind == "bin":
+        op = tree[1]
+        left_val = evaluate_tree(tree[2])
+        right_val = evaluate_tree(tree[3])
+
+        if left_val == "ERROR" or right_val == "ERROR":
+            return "ERROR"
+
+        if op == "+":
+            return left_val + right_val
+        if op == "-":
+            return left_val - right_val
+        if op == "*":
+            return left_val * right_val
+        if op == "/":
+            if right_val == 0:
+                return "ERROR"
+            return left_val / right_val
+    return "ERROR"
+
+def tree_to_string(tree) -> str:
+    kind = tree[0]
+
+    if kind == "num":
+        return format_number(tree[1])
+
+    if kind == "neg":
+        return f"(neg {tree_to_string(tree[1])})"
+
+    if kind == "bin":
+        op = tree[1]
+        left = tree_to_string(tree[2])
+        right = tree_to_string(tree[3])
+        return f"({op} {left} {right})"
+
+    raise ValueError("Invalid tree")
+
+def format_number(value: float) -> str:
+
+    if float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+def format_result(value: float) -> str:
+
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.4f}"
 
 
-def format_result_value(val):
-    if isinstance(val, float):
-        if val.is_integer():
-            return str(int(val))
-        else:
-            return f"{val:.4f}".rstrip("0").rstrip(".")
-    return str(val)
 
-
-def evaluate_file(input_path: str) -> list[dict]:
-    results = []
-
-    base_dir = os.path.dirname(os.path.abspath(input_path))
-    output_path = os.path.join(base_dir, "output.txt")
-
-    with open(input_path, "r") as f:
-        lines = f.readlines()
-
-    out_lines = []
-
-    for line in lines:
-        original = line.rstrip("\n")
-        entry = {"input": original, "tree": "", "tokens": "", "result": ""}
-
-        try:
-            tree, tokens, value = evaluate_expression(original)
-            tree_str = format_tree(tree)
-            tokens_str = format_tokens(tokens)
-            result_str = format_result_value(value)
-
-            entry["tree"] = tree_str
-            entry["tokens"] = tokens_str
-            entry["result"] = float(result_str) if "." in result_str else float(result_str)
-
-            out_lines.append(f"Input: {original}")
-            out_lines.append(f"Tree: {tree_str}")
-            out_lines.append(f"Tokens: {tokens_str}")
-            out_lines.append(f"Result: {result_str}")
-            out_lines.append("")
-
-        except Exception:
-            entry["tree"] = "ERROR"
-            entry["tokens"] = "ERROR"
-            entry["result"] = "ERROR"
-
-            out_lines.append(f"Input: {original}")
-            out_lines.append("Tree: ERROR")
-            out_lines.append("Tokens: ERROR")
-            out_lines.append("Result: ERROR")
-            out_lines.append("")
-
-        results.append(entry)
-
-    with open(output_path, "w") as f:
-        f.write("\n".join(out_lines).rstrip() + "\n")
-
-    return results
-
-
+# --------------------- TEST CODE (INPUT FILE) ---------------------
 if __name__ == "__main__":
-    # Simple manual test runner (optional)
-    path = input("Enter input file path: ").strip()
-    evaluate_file(path)
-    print("output.txt written.")
+    test_file = "input.txt"
+    result = evaluate_file(test_file)
+    for r in result:
+        print(r)
