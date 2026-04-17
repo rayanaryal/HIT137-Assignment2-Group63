@@ -318,12 +318,3 @@ def format_result(value: float) -> str:
         return str(int(value))
     return f"{value:.4f}"
 
-
-
-
-# --------------------- TEST CODE (INPUT FILE) ---------------------
-if __name__ == "__main__":
-    test_file = "input.txt"
-    result = evaluate_file(test_file)
-    for r in result:
-        print(r)
