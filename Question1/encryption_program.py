@@ -1,4 +1,13 @@
+'''
+HIT137 SOFTWARE NOW
+Assignment 2
 
+Group: Group 63
+Group Members and Student ID:
+        Rupesh Timalsina: S400656
+        Swastik Bista: S400506
+        Rajan Aryal: S333047
+'''
 
 
 # Function to encrypt single character
